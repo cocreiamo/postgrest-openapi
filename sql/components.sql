@@ -97,7 +97,7 @@ select coalesce(jsonb_object_agg(x.component_name, x.oas_schema), '{}')
 from (
   select table_full_name as component_name,
     oas_schema_object(
-      description := table_description,
+      description := postgrest_comment_text(table_description),
       properties := coalesce(columns, '{}'),
       required := required_cols,
       type := 'object'
@@ -170,7 +170,7 @@ from (
     'rpc.' || function_full_name as component_name,
     case when not return_type_is_simple then
       oas_schema_object(
-        description := function_description,
+        description := postgrest_comment_text(function_description),
         properties := coalesce(arguments, '{}'),
         type := 'object'
       )
@@ -232,7 +232,7 @@ from (
   select
     'rpc.args.' || function_full_name as component_name,
     oas_schema_object(
-      description := function_description,
+      description := postgrest_comment_text(function_description),
       properties := coalesce(arguments, '{}'),
       type := 'object',
       required := required_arguments
