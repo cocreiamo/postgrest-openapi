@@ -30,6 +30,14 @@ returns table (
 ) language sql stable as
 $$
 WITH RECURSIVE
+  -- updatability once per view or foreign table, not three times per column: each call analyses the view
+  rel_updatable AS MATERIALIZED (
+    SELECT c.oid, pg_relation_is_updatable(c.oid::regclass, TRUE) AS mask
+    FROM pg_class c
+    WHERE c.relkind IN ('v', 'f')
+      AND c.relnamespace NOT IN ('pg_catalog'::regnamespace, 'information_schema'::regnamespace)
+      AND NOT pg_is_other_temp_schema(c.relnamespace)
+  ),
   tbl_pk_cols AS (
     SELECT
       r.oid AS relid,
@@ -110,7 +118,7 @@ WITH RECURSIVE
         -- The function `pg_relation_is_updateable` returns a bitmask where 8
         -- corresponds to `1 << CMD_INSERT` in the PostgreSQL source code, i.e.
         -- it's possible to insert into the relation.
-        AND (pg_relation_is_updatable(c.oid::regclass, TRUE) & 8) = 8
+        AND (upd.mask & 8) = 8
       )
     ) AS insertable,
     (
@@ -118,7 +126,7 @@ WITH RECURSIVE
       OR (
         c.relkind in ('v','f')
         -- CMD_UPDATE
-        AND (pg_relation_is_updatable(c.oid::regclass, TRUE) & 4) = 4
+        AND (upd.mask & 4) = 4
       )
     ) AS updatable,
     (
@@ -126,7 +134,7 @@ WITH RECURSIVE
       OR (
         c.relkind in ('v','f')
         -- CMD_DELETE
-        AND (pg_relation_is_updatable(c.oid::regclass, TRUE) & 16) = 16
+        AND (upd.mask & 16) = 16
       )
     ) AS deletable
   FROM pg_attribute a
@@ -154,6 +162,8 @@ WITH RECURSIVE
         ON seq.refobjid = a.attrelid AND seq.refobjsubid = a.attnum and seq.deptype = 'i'
     LEFT JOIN tbl_pk_cols tpks
         ON c.oid = tpks.relid AND a.attrelid = tpks.position
+    LEFT JOIN rel_updatable upd
+        ON upd.oid = c.oid
   WHERE
     NOT pg_is_other_temp_schema(c.relnamespace)
     AND a.attnum > 0

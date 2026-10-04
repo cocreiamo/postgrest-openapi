@@ -26,11 +26,12 @@ $$;
 create or replace function oas_build_component_schemas_from_tables_and_composite_types(schemas text[])
 returns jsonb language sql stable as
 $$
-with recursive all_rels as (
+-- materialized: read the catalog once, not once per row of the recursion
+with recursive all_rels as materialized (
   select *
   from postgrest_get_all_tables_and_composite_types()
 ),
-all_funcs as (
+all_funcs as materialized (
   select *
   from postgrest_get_all_functions(schemas)
 ),
@@ -395,10 +396,10 @@ from (
         and (is_table or is_view)
       )
       -- composite type columns can also be used as row filters if a function returns it
-      or exists (
-        select 1
+      -- (the functions read once, not once per column)
+      or table_oid in (
+        select return_type_composite_relid
         from postgrest_get_all_functions(schemas)
-        where return_type_composite_relid = table_oid
       )
   ) _
 ) x;

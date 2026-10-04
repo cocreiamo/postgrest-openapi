@@ -23,7 +23,9 @@ create or replace function postgrest_openapi_spec(
   -- the schema an Accept-Profile/Content-Profile header selects, when PostgREST serves several
   profile text default null
 )
-returns jsonb language sql stable as
+-- one large query over the catalog: compiling it (JIT, its estimated cost passes the threshold) took seconds,
+-- running it a few hundred milliseconds
+returns jsonb language sql stable set jit = off as
 $$
 select oas_openapi_object(
   openapi := '3.1.0',
