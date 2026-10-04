@@ -231,12 +231,14 @@ select coalesce(jsonb_object_agg(x.component_name, x.oas_schema), '{}')
 from (
   select
     'rpc.args.' || function_full_name as component_name,
-    oas_schema_object(
+    -- x-arguments in the comment's OpenAPI fragment refines the arguments' schema (e.g. an integer the function takes
+    -- as numeric, because PostgREST casts a JSON number like 2.0 to integer with an error)
+    oas_merge(oas_schema_object(
       description := postgrest_comment_text(function_description),
       properties := coalesce(arguments, '{}'),
       type := 'object',
       required := required_arguments
-    ) as oas_schema
+    ), coalesce(postgrest_comment_openapi(function_description) -> 'x-arguments', '{}')) as oas_schema
   from
     aggregated_function_arguments
 ) x;

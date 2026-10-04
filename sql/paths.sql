@@ -19,7 +19,7 @@ from (
         oas_merge(o.operation, jsonb_build_object('operationId', o.method || '.' || (o.operation ->> 'x-name'))
           || case when profile is null then '{}'::jsonb else jsonb_build_object('parameters', jsonb_build_array(
                oas_build_reference_to_parameters(case when o.method in ('get', 'head') then 'acceptProfile' else 'contentProfile' end))) end),
-        postgrest_comment_openapi(o.operation ->> 'x-comment')
+        postgrest_comment_openapi(o.operation ->> 'x-comment') - 'x-arguments'
       ) - 'x-name' - 'x-comment' - 'x-internal'
     ) as item
   from jsonb_each(path_items) p(path, methods),
