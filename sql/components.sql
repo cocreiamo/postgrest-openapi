@@ -1,13 +1,13 @@
 -- Functions to build the Components Object of the OAS document
 
-create or replace function oas_build_components(schemas text[])
+create or replace function oas_build_components(schemas text[], profile text default null, client_error_format text default null)
 returns jsonb language sql stable as
 $$
 select oas_components_object(
   schemas := oas_build_component_schemas(schemas),
-  parameters := oas_build_component_parameters(schemas),
+  parameters := oas_build_component_parameters(schemas, profile),
   requestBodies := oas_build_request_bodies(schemas),
-  responses := oas_build_response_objects(schemas),
+  responses := oas_build_response_objects(schemas, client_error_format),
   securitySchemes := oas_build_component_security_schemes()
 )
 $$;
@@ -67,10 +67,10 @@ all_tables_and_composite_types as (
         case when column_item_data_type is null and column_is_composite then
           oas_build_reference_to_schemas(column_composite_full_name)
         else
-          oas_schema_object(
+          oas_nullable(oas_schema_object(
             description := column_description,
             type := postgrest_pgtype_to_oastype(column_data_type),
-            format := column_data_type::text,
+            format := postgrest_pgtype_to_oasformat(column_data_type),
             maxlength := column_character_maximum_length,
             -- "default" :=  to_jsonb(info.column_default),
             enum := to_jsonb(column_enums),
@@ -83,10 +83,10 @@ all_tables_and_composite_types as (
               else
                 oas_schema_object(
                   type := postgrest_pgtype_to_oastype(column_item_data_type),
-                  format := column_item_data_type::text
+                  format := postgrest_pgtype_to_oasformat(column_item_data_type)
                 )
               end
-          )
+          ), column_is_nullable)
         end order by column_position
     ) as columns
   from recursive_rels_in_schema
@@ -203,9 +203,11 @@ aggregated_function_arguments as (
       case when argument_item_type_name is null and argument_is_composite then
         oas_build_reference_to_schemas(argument_composite_full_name)
       else
-        oas_schema_object(
+        -- an argument of a function that is not STRICT may be null
+        oas_nullable(oas_schema_object(
           type := postgrest_pgtype_to_oastype(argument_type_name),
-          format := argument_type_name::text,
+          format := postgrest_pgtype_to_oasformat(argument_type_name),
+          pattern := postgrest_pgtype_value_pattern(argument_type_name),
           items :=
             case
             when argument_item_type_name is null then
@@ -215,10 +217,10 @@ aggregated_function_arguments as (
             else
               oas_schema_object(
                 type := postgrest_pgtype_to_oastype(argument_item_type_name),
-                format := argument_item_type_name::text
+                format := postgrest_pgtype_to_oasformat(argument_item_type_name)
               )
             end
-        )
+        ), not is_strict)
       end order by argument_position
     ) as arguments
   from all_functions_with_arguments
@@ -358,10 +360,12 @@ $$;
 
 -- Parameters
 
-create or replace function oas_build_component_parameters(schemas text[])
+create or replace function oas_build_component_parameters(schemas text[], profile text default null)
 returns jsonb language sql stable as
 $$
   select oas_build_component_parameters_query_params_from_tables(schemas) ||
+         oas_build_component_parameters_query_params_per_table(schemas) ||
+         oas_build_component_parameters_profile(profile) ||
          oas_build_component_parameters_query_params_from_function_args(schemas) ||
          oas_build_component_parameters_query_params_from_function_ret(schemas) ||
          oas_build_component_parameters_query_params_common() ||
@@ -377,12 +381,14 @@ from (
     oas_parameter_object(
       name := column_name,
       "in" := 'query',
+      description := column_description,
       schema := oas_schema_object(
-        type := 'string'
+        type := 'string',
+        pattern := postgrest_pgtype_filter_pattern(column_data_type)
       )
     ) as param_schema
   from (
-    select table_full_name, column_name
+    select table_full_name, column_name, column_description, column_data_type
     from postgrest_get_all_tables_and_composite_types()
     where (
         table_schema = any(schemas)
@@ -396,6 +402,48 @@ from (
       )
   ) _
 ) x;
+$$;
+
+-- select and order of each table, over its own columns (the logic trees stay free text: typed patterns of
+-- every condition made test generators crawl)
+create or replace function oas_build_component_parameters_query_params_per_table(schemas text[])
+returns jsonb language sql stable as
+$$
+select coalesce(jsonb_object_agg(x.param_name, x.param_schema), '{}')
+from (
+  select format('%1$s.%2$s', p.name, table_full_name) as param_name,
+    oas_parameter_object(
+      name := p.name,
+      "in" := 'query',
+      description := p.description,
+      explode := false,
+      schema := oas_schema_object(type := 'string', pattern := format(p.pattern, columns))
+    ) as param_schema
+  from (
+    select table_full_name,
+      '(' || string_agg(column_name, '|' order by column_position) || ')' as columns
+    from postgrest_get_all_tables_and_composite_types()
+    where table_schema = any(schemas) and (is_table or is_view)
+    group by table_full_name
+  ) t,
+  (values
+    ('select', 'Vertical filtering of columns (empty or *: all)', '^(\*|%1$s(,%1$s)*)?$'),
+    ('order', 'Ordering by column', '^%1$s(\.(asc|desc))?(,%1$s(\.(asc|desc))?)*$')
+  ) p(name, description, pattern)
+) x;
+$$;
+
+-- The version of the API a request selects, when PostgREST serves several schemas (Accept-Profile for reads,
+-- Content-Profile for writes): only this one; without it PostgREST answers with its default schema
+create or replace function oas_build_component_parameters_profile(profile text)
+returns jsonb language sql stable as
+$$
+select case when profile is null then '{}'::jsonb else jsonb_build_object(
+  'acceptProfile', oas_parameter_object(name := 'Accept-Profile', "in" := 'header', description := 'Schema of a read',
+                                        schema := oas_schema_object(type := 'string', enum := jsonb_build_array(profile))),
+  'contentProfile', oas_parameter_object(name := 'Content-Profile', "in" := 'header', description := 'Schema of a write',
+                                         schema := oas_schema_object(type := 'string', enum := jsonb_build_array(profile)))
+) end;
 $$;
 
 -- Builds "rowFilter"s for functions returning TABLE or INOUT/OUT types
@@ -440,7 +488,8 @@ from (
         else
           oas_schema_object(
             type := argument_oastype,
-            format := argument_type_name::text
+            format := postgrest_pgtype_to_oasformat(argument_type_name),
+            pattern := postgrest_pgtype_value_pattern(argument_type_name)
           )
         end
     ) as param_schema
@@ -779,12 +828,12 @@ $$;
 
 -- Responses
 
-create or replace function oas_build_response_objects(schemas text[])
+create or replace function oas_build_response_objects(schemas text[], client_error_format text default null)
 returns jsonb language sql stable as
 $$
 select oas_build_response_objects_from_tables(schemas) ||
        oas_build_response_objects_from_function_return_types(schemas) ||
-       oas_build_response_objects_common();
+       oas_build_response_objects_common(client_error_format);
 $$;
 
 create or replace function oas_build_response_objects_from_tables(schemas text[])
@@ -935,11 +984,36 @@ from (
 ) as x
 $$;
 
-create or replace function oas_build_response_objects_common()
+create or replace function oas_build_response_objects_common(client_error_format text default null)
 returns jsonb language sql stable as
 $$
 select jsonb_build_object(
   'defaultError',
+  case when client_error_format = 'rfc9457' then
+  -- PostgREST with client-error-format = rfc9457: RFC 9457 problem details, PostgREST's members as extensions
+  oas_response_object(
+    description := 'Problem details (RFC 9457)',
+    content := jsonb_build_object(
+      'application/problem+json',
+      oas_media_type_object(
+        schema := oas_schema_object(
+          type := 'object',
+          required := array['type', 'title', 'status'],
+          properties := jsonb_build_object(
+            'type', oas_schema_object(type := 'string', format := 'uri-reference'),
+            'title', oas_schema_object(type := 'string'),
+            'status', oas_schema_object(type := 'integer'),
+            'detail', oas_schema_object(type := 'string'),
+            'instance', oas_schema_object(type := 'string', format := 'uri-reference'),
+            'code', oas_schema_object(type := 'string'),
+            'details', '{}'::jsonb,
+            'hint', '{}'::jsonb
+          )
+        )
+      )
+    )
+  )
+  else
   oas_response_object(
     description := 'Default error reponse',
     content := jsonb_build_object(
@@ -956,7 +1030,8 @@ select jsonb_build_object(
         )
       )
     )
-  ),
+  )
+  end,
   'empty',
   oas_response_object(
     description := 'No media types when response body is empty'

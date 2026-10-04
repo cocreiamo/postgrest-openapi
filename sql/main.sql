@@ -17,7 +17,11 @@ create or replace function postgrest_openapi_spec(
   schemas text[],
   postgrest_version text default null,
   proa_version text default null,
-  document_version text default null
+  document_version text default null,
+  -- PostgREST's client-error-format: rfc9457 documents errors as RFC 9457 problem details
+  client_error_format text default null,
+  -- the schema an Accept-Profile/Content-Profile header selects, when PostgREST serves several
+  profile text default null
 )
 returns jsonb language sql stable as
 $$
@@ -45,8 +49,11 @@ select oas_openapi_object(
     )
   ),
   servers := oas_build_servers(),
-  paths := oas_build_paths(schemas),
-  components := oas_build_components(schemas),
+  -- the OpenAPI fragment of the schema's comment applies to every operation
+  paths := (select coalesce(jsonb_object_agg(path, (select jsonb_object_agg(method, oas_merge(operation, postgrest_comment_openapi(sd.comment)))
+                                                     from jsonb_each(item) o(method, operation))), '{}')
+            from jsonb_each(oas_build_paths(schemas, profile)) p(path, item)),
+  components := oas_build_components(schemas, profile, client_error_format),
   security := '[{"JWT": []}]'
 )
 from postgrest_get_schema_description(schemas[1]) sd;
