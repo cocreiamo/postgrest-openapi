@@ -11,7 +11,7 @@ $$;
 create or replace function oas_build_path_items_from_tables(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.path, x.oas_path_item)
+select coalesce(jsonb_object_agg(x.path, x.oas_path_item), '{}')
 from (
   select '/' || table_name as path,
     oas_path_item_object(
@@ -138,11 +138,12 @@ $$;
 create or replace function oas_build_path_items_from_functions(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.path, x.oas_path_item)
+select coalesce(jsonb_object_agg(x.path, x.oas_path_item), '{}')
 from (
   select '/rpc/' || function_name as path,
     oas_path_item_object(
-      get :=oas_operation_object(
+      -- like PostgREST, which answers GET only for functions that are not volatile
+      get := case when not is_volatile then oas_operation_object(
         summary := (postgrest_unfold_comment(function_description))[1],
         description := (postgrest_unfold_comment(function_description))[2],
         tags := array['(rpc) ' || function_name],
@@ -189,7 +190,7 @@ from (
             'default',
             oas_build_reference_to_responses('defaultError', 'Error')
           )
-      ),
+      ) end,
       post := oas_operation_object(
         summary := (postgrest_unfold_comment(function_description))[1],
         description := (postgrest_unfold_comment(function_description))[2],
@@ -243,7 +244,7 @@ from (
       )
     ) as oas_path_item
   from (
-    select function_name, function_full_name, function_description, return_type_name, return_type_is_set, return_type_is_table, return_type_is_out, return_type_composite_relid, argument_name, argument_is_in, argument_is_inout, argument_is_out, argument_is_table, argument_is_variadic, argument_input_qty,
+    select function_name, function_full_name, function_description, return_type_name, return_type_is_set, return_type_is_table, return_type_is_out, return_type_composite_relid, argument_name, argument_is_in, argument_is_inout, argument_is_out, argument_is_table, argument_is_variadic, argument_input_qty, is_volatile,
            comp.return_composite_param_ref
     from postgrest_get_all_functions(schemas) f
     left join lateral (
@@ -255,7 +256,7 @@ from (
       ) _
     ) comp on true
   ) _
-  group by function_name, function_full_name, function_description, return_type_name, return_type_is_set, return_type_is_table, return_type_is_out, return_type_composite_relid, argument_input_qty, return_composite_param_ref
+  group by function_name, function_full_name, function_description, return_type_name, return_type_is_set, return_type_is_table, return_type_is_out, return_type_composite_relid, argument_input_qty, return_composite_param_ref, is_volatile
 ) x;
 $$;
 

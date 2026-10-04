@@ -92,7 +92,7 @@ all_tables_and_composite_types as (
   from recursive_rels_in_schema
   group by table_schema, table_full_name, table_description, is_composite
 )
-select jsonb_object_agg(x.component_name, x.oas_schema)
+select coalesce(jsonb_object_agg(x.component_name, x.oas_schema), '{}')
 from (
   select table_full_name as component_name,
     oas_schema_object(
@@ -163,7 +163,7 @@ aggregated_function_returns as (
   from all_functions_returning_table_out_simple_types
   group by function_schema, function_name, function_full_name, function_description, return_type_is_simple, return_type_name, return_type_item_name
 )
-select jsonb_object_agg(x.component_name, x.oas_schema)
+select coalesce(jsonb_object_agg(x.component_name, x.oas_schema), '{}')
 from (
   select
     'rpc.' || function_full_name as component_name,
@@ -224,7 +224,7 @@ aggregated_function_arguments as (
   from all_functions_with_arguments
   group by function_schema, function_full_name, function_description
 )
-select jsonb_object_agg(x.component_name, x.oas_schema)
+select coalesce(jsonb_object_agg(x.component_name, x.oas_schema), '{}')
 from (
   select
     'rpc.args.' || function_full_name as component_name,
@@ -371,7 +371,7 @@ $$;
 create or replace function oas_build_component_parameters_query_params_from_tables(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.param_name, x.param_schema)
+select coalesce(jsonb_object_agg(x.param_name, x.param_schema), '{}')
 from (
   select format('rowFilter.%1$s.%2$s', table_full_name, column_name) as param_name,
     oas_parameter_object(
@@ -402,7 +402,7 @@ $$;
 create or replace function oas_build_component_parameters_query_params_from_function_ret(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.param_name, x.param_schema)
+select coalesce(jsonb_object_agg(x.param_name, x.param_schema), '{}')
 from (
   select format('rowFilter.rpc.%1$s.%2$s', function_full_name, argument_name) as param_name,
     oas_parameter_object(
@@ -421,7 +421,7 @@ $$;
 create or replace function oas_build_component_parameters_query_params_from_function_args(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.param_name, x.param_schema)
+select coalesce(jsonb_object_agg(x.param_name, x.param_schema), '{}')
 from (
   select format('rpcParam.%1$s.%2$s', function_full_name, argument_name) as param_name,
     oas_parameter_object(
@@ -790,8 +790,8 @@ $$;
 create or replace function oas_build_response_objects_from_tables(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.not_empty, x.not_empty_response) ||
-       jsonb_object_agg(x.may_be_empty, x.may_be_empty_response)
+select coalesce(jsonb_object_agg(x.not_empty, x.not_empty_response), '{}') ||
+       coalesce(jsonb_object_agg(x.may_be_empty, x.may_be_empty_response), '{}')
 from (
   select 'notEmpty.' || table_full_name as not_empty,
     oas_response_object(
@@ -882,7 +882,7 @@ $$;
 create or replace function oas_build_response_objects_from_function_return_types(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.not_empty, x.not_empty_response)
+select coalesce(jsonb_object_agg(x.not_empty, x.not_empty_response), '{}')
 from (
   select 'rpc.' || function_full_name as not_empty,
     oas_response_object(
@@ -977,7 +977,7 @@ $$;
 create or replace function oas_build_request_bodies_from_tables(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg(x.table_full_name, x.oas_req_body)
+select coalesce(jsonb_object_agg(x.table_full_name, x.oas_req_body), '{}')
 from (
   select
     table_full_name,
@@ -1020,7 +1020,7 @@ $$;
 create or replace function oas_build_request_bodies_from_functions(schemas text[])
 returns jsonb language sql stable as
 $$
-select jsonb_object_agg('rpc.' || x.function_full_name, x.oas_req_body)
+select coalesce(jsonb_object_agg('rpc.' || x.function_full_name, x.oas_req_body), '{}')
 from (
   select
     function_full_name,
