@@ -162,3 +162,11 @@ returns text language sql immutable as
 $$
 select case when strpos(comm, E'\n--- openapi\n') > 0 then substr(comm, 1, strpos(comm, E'\n--- openapi\n') - 1) else comm end;
 $$;
+
+-- The media type a domain names (a PostgREST media type handler, e.g. api."application/cloudevents-batch+json"), or
+-- null for any other type
+create or replace function postgrest_media_type(type_name text)
+returns text language sql immutable as
+$$
+select substring(type_name from '"([a-z]+/[^"]+)"$');
+$$;

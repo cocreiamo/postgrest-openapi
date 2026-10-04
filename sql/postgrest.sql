@@ -198,6 +198,7 @@ returns table (
   function_description text,
   function_input_argument_types oidvector,
   return_type_name text,
+  return_type_media_type text,
   return_type_item_name text,
   return_type_is_set bool,
   return_type_is_table bool,
@@ -263,6 +264,8 @@ $$
       d.description AS function_description,
       p.proargtypes AS function_input_argument_types,
       format_type(t.oid, NULL::integer) AS return_type_name,
+      -- the declared type, before domains are resolved: a media type handler is a domain
+      postgrest_media_type(format_type(p.prorettype, NULL::integer)) AS return_type_media_type,
       format_type(t_arr.oid, NULL::integer) AS return_type_item_name,
       p.proretset AS return_type_is_set,
       COALESCE(proargmodes::text[] && '{t}', FALSE) return_type_is_table, -- If the function RETURNS TABLE

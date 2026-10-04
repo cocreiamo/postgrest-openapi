@@ -936,7 +936,12 @@ from (
   select 'rpc.' || function_full_name as not_empty,
     oas_response_object(
       description := 'Media types for RPC ' || function_full_name,
-      content := jsonb_build_object(
+      content := case when return_type_media_type is not null then
+        -- a media type handler (a domain named after the media type): PostgREST answers that media type when asked,
+        -- and application/json otherwise if the domain is json
+        jsonb_build_object(return_type_media_type, oas_media_type_object(schema := '{}'::jsonb))
+        || case when return_type_name in ('json', 'jsonb') then jsonb_build_object('application/json', oas_media_type_object(schema := '{}'::jsonb)) else '{}'::jsonb end
+      else jsonb_build_object(
         'application/json',
         case when return_type_is_set then
           oas_media_type_object(
@@ -970,7 +975,7 @@ from (
             format := 'csv'
           )
         )
-      )
+      ) end
     ) as not_empty_response
   from (
     select *,
@@ -981,9 +986,9 @@ from (
         oas_build_reference_to_schemas('rpc.' || function_full_name)
       end as return_type_reference_schema
     from (
-      select function_full_name, return_type_is_set, return_type_is_composite, return_type_composite_full_name
+      select function_full_name, return_type_name, return_type_media_type, return_type_is_set, return_type_is_composite, return_type_composite_full_name
       from postgrest_get_all_functions(schemas)
-      group by function_full_name, return_type_is_set, return_type_is_composite, return_type_composite_full_name
+      group by function_full_name, return_type_name, return_type_media_type, return_type_is_set, return_type_is_composite, return_type_composite_full_name
     ) _
   ) _
 ) as x
