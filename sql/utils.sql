@@ -109,13 +109,17 @@ from (select postgrest_pgtype_filter_literal(type) as l) _
 where l is not null;
 $$;
 
--- Pattern of a value of the type in a request body the database always accepts, or null: an instant with an offset
--- timestamptz takes (RFC 3339 allows up to 23:59, PostgreSQL 15:59), text without the NUL character
+-- Pattern of a value of the type in a request body the database always accepts, or null: a uuid, a date up to the
+-- 28th of a year from 1 (there is no year 0), an instant with an offset timestamptz takes (RFC 3339 allows up to 23:59, PostgreSQL 15:59), text without
+-- the NUL character (a format alone lets generators send an empty string)
 create or replace function postgrest_pgtype_value_pattern(type text)
 returns text language sql immutable as
 $$
 select case
-         when type = 'timestamp with time zone' then '^.+([Zz]|[+-](0[0-9]|1[0-5]):[0-5][0-9])$'
+         when type = 'uuid' then '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+         when type = 'date' then '^(000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|1[0-9]|2[0-8])$'
+         when type = 'timestamp with time zone'
+           then '^(000[1-9]|00[1-9][0-9]|0[1-9][0-9]{2}|[1-9][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|1[0-9]|2[0-8])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]{1,6})?([Zz]|[+-](0[0-9]|1[0-5]):[0-5][0-9])$'
          when type in ('text', 'character varying', 'character') then '^[^\u0000]*$'
        end;
 $$;

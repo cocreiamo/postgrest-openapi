@@ -177,7 +177,9 @@ from (
             ) filter ( where argument_name <> '' and (argument_is_in or argument_is_inout or argument_is_variadic)),
             '[]'
           ) ||
-          case when return_type_is_table or return_type_is_out or return_type_composite_relid <> 0 then
+          -- select, order, limit, offset, logic trees: for functions returning a set; on one row they mean nothing, and
+          -- limit=0 would even skip the call (LIMIT 0 never runs the function)
+          case when return_type_is_set and (return_type_is_table or return_type_is_out or return_type_composite_relid <> 0) then
             jsonb_build_array(
               oas_build_reference_to_table_parameter('select', return_type_composite_full_name, schemas),
               oas_build_reference_to_table_parameter('order', return_type_composite_full_name, schemas),
@@ -229,7 +231,9 @@ from (
             '[]'
           ) ||
           return_composite_param_ref ||
-          case when return_type_is_table or return_type_is_out or return_type_composite_relid <> 0 then
+          -- select, order, limit, offset, logic trees: for functions returning a set; on one row they mean nothing, and
+          -- limit=0 would even skip the call (LIMIT 0 never runs the function)
+          case when return_type_is_set and (return_type_is_table or return_type_is_out or return_type_composite_relid <> 0) then
             jsonb_build_array(
               oas_build_reference_to_table_parameter('select', return_type_composite_full_name, schemas),
               oas_build_reference_to_table_parameter('order', return_type_composite_full_name, schemas),
