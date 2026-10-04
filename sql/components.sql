@@ -544,11 +544,10 @@ select jsonb_object_agg(name, param_object) from unnest(
     oas_parameter_object(
       name := 'offset',
       "in" := 'query',
-      description := 'Skip a certain number of rows',
+      -- PostgREST reads a negative offset as 0 and ignores one that is not an integer: any value is valid
+      description := 'Skip a certain number of rows (an integer; other values are ignored)',
       explode := false,
-      schema := oas_schema_object(
-        type := 'integer'
-      )
+      schema := '{}'::jsonb
     ),
     oas_parameter_object(
       name := 'on_conflict',
@@ -946,6 +945,11 @@ from (
               items := return_type_reference_schema
             )
           )
+        when return_type_is_composite then
+          -- one row, or null when the query's row filters leave it out
+          oas_media_type_object(
+            schema := oas_schema_object(anyOf := jsonb_build_array(return_type_reference_schema, oas_schema_object(type := 'null')))
+          )
         else
           oas_media_type_object(
             schema := return_type_reference_schema
@@ -1153,14 +1157,8 @@ from (
             'application/x-www-form-urlencoded',
             oas_media_type_object(
               "schema" := oas_build_reference_to_schemas('rpc.args.' || function_full_name)
-            ),
-            'text/csv',
-            oas_media_type_object(
-              "schema" := oas_schema_object(
-                type := 'string',
-                format := 'csv'
-              )
             )
+            -- no text/csv: PostgREST reads named arguments from JSON or a form (docs references/api/functions.rst)
           )
         end
     ) as oas_req_body

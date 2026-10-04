@@ -52,7 +52,10 @@ select oas_openapi_object(
   ),
   servers := oas_build_servers(),
   -- the OpenAPI fragment of the schema's comment applies to every operation
-  paths := (select coalesce(jsonb_object_agg(path, (select jsonb_object_agg(method, oas_merge(operation, postgrest_comment_openapi(sd.comment)))
+  paths := (select coalesce(jsonb_object_agg(path, (select jsonb_object_agg(method,
+                                                       case when method in ('get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace')
+                                                                 and jsonb_typeof(operation) = 'object'
+                                                            then oas_merge(operation, postgrest_comment_openapi(sd.comment)) else operation end)
                                                      from jsonb_each(item) o(method, operation))), '{}')
             from jsonb_each(oas_build_paths(schemas, profile)) p(path, item)),
   components := oas_build_components(schemas, profile, client_error_format),
