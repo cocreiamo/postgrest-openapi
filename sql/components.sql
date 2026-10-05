@@ -539,17 +539,17 @@ select jsonb_object_agg(name, param_object) from unnest(
       "in" := 'query',
       description := 'Limit the number of rows returned',
       explode := false,
-      schema := oas_schema_object(
-        type := 'integer'
-      )
+      -- PostgreSQL reads it as a bigint: a larger integer is refused (22003)
+      schema := '{"type": "integer", "minimum": -9223372036854775808, "maximum": 9223372036854775807}'::jsonb
     ),
     oas_parameter_object(
       name := 'offset',
       "in" := 'query',
-      -- PostgREST reads a negative offset as 0 and ignores one that is not an integer: any value is valid
+      -- PostgREST reads a negative offset as 0 and ignores one that is not an integer, but an integer outside bigint is
+      -- refused (22003): any value except those
       description := 'Skip a certain number of rows (an integer; other values are ignored)',
       explode := false,
-      schema := '{}'::jsonb
+      schema := '{"not": {"allOf": [{"type": "integer"}, {"not": {"minimum": -9223372036854775808, "maximum": 9223372036854775807}}]}}'::jsonb
     ),
     oas_parameter_object(
       name := 'on_conflict',
