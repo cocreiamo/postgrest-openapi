@@ -489,15 +489,17 @@ from (
             )
           )
         else
-          oas_schema_object(
+          -- x-arguments in the comment's OpenAPI fragment refines the argument here too (the query parameter of GET),
+          -- as it does in the request body's schema (rpc.args.*)
+          oas_merge(oas_schema_object(
             type := argument_oastype,
             format := postgrest_pgtype_to_oasformat(argument_type_name),
             pattern := postgrest_pgtype_value_pattern(argument_type_name)
-          )
+          ), coalesce(postgrest_comment_openapi(function_description) -> 'x-arguments' -> 'properties' -> argument_name, '{}'))
         end
     ) as param_schema
   from (
-    select function_full_name, argument_name, argument_is_required, argument_type_name, argument_is_variadic,
+    select function_full_name, function_description, argument_name, argument_is_required, argument_type_name, argument_is_variadic,
            -- In query parameters, "array" and "object" types have a different format, so we use a generic "string"
            case when postgrest_pgtype_to_oastype(argument_type_name) = any ('{array,object}') then 'string' else postgrest_pgtype_to_oastype(argument_type_name) end as argument_oastype
     from postgrest_get_all_functions(schemas)
